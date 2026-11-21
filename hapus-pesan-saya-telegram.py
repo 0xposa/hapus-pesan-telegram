@@ -1,25 +1,18 @@
 # ============================================================
-# Hapus SEMUA pesan SAYA SENDIRI di satu chat Telegram
-# (pesan lawan bicara tidak disentuh sama sekali)
+# PENGHAPUS PESAN TELEGRAM SAYA
+# Menghapus SEMUA pesan SAYA SENDIRI di satu chat Telegram.
+# Pesan lawan bicara tidak disentuh sama sekali.
 #
-# Jalan di HP Master sendiri lewat Termux. BUKAN di server Raphael.
-# TIDAK PERLU EDIT FILE INI — jalankan saja, nanti ditanya satu-satu.
-# api_id / api_hash / kode login JANGAN pernah dikirim ke chat mana pun.
+# Jalan di HP Master sendiri lewat Termux — tidak perlu edit file.
+# Jalankan saja (atau lewat jalan.sh), lalu jawab pertanyaan di layar.
+# Semua pertanyaan berbahasa Indonesia, langkahnya diberi nomor.
 #
-# Cara pakai:
-#   1. Ambil api_id + api_hash dari https://my.telegram.org
-#      (login pakai nomor Master -> API development tools)
-#   2. pip install telethon
-#   3. python hapus-pesan-saya-telegram.py
-#      - Pertama kali: ditanya api_id, api_hash (disimpan di kunci.json
-#        di folder yang sama, biar tidak ditanya lagi), lalu nomor HP +
-#        kode yang masuk ke Telegram Master.
-#      - Setiap jalan: ditanya chat siapa yang mau dibersihkan.
-#      - Sebelum menghapus, jumlah pesan dihitung dulu dan skrip minta
-#        Master mengetik HAPUS sebagai tanda yakin.
+# api_id / api_hash / kode login / password JANGAN pernah
+# dikirim ke chat mana pun — ketik hanya di Termux ini.
 #
-# PERINGATAN: penghapusan berlaku untuk DUA SISI (hilang juga di HP
-# lawan bicara) dan TIDAK BISA dibatalkan / dikembalikan.
+# PERINGATAN: pesan yang dihapus hilang juga di HP lawan bicara
+# dan TIDAK BISA dikembalikan. Skrip selalu menghitung dulu dan
+# minta ketik HAPUS sebelum benar-benar menghapus.
 # File kunci.json dan sesi-saya.session = kunci akun Master.
 # Jangan dibagikan ke siapa pun.
 # ============================================================
@@ -27,71 +20,143 @@
 import asyncio
 import json
 import os
+import re
+import sys
+import time
+from getpass import getpass
 
-from telethon import TelegramClient
+from telethon import TelegramClient, errors
 
-FILE_KUNCI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kunci.json")
+DASAR = os.path.dirname(os.path.abspath(__file__))
+FILE_KUNCI = os.path.join(DASAR, "kunci.json")
+
+
+def tanya(teks):
+    return input(teks).strip()
+
+
+def bersihkan_nomor(n):
+    """Terima nomor apa adanya (08xx, +62xx, pakai spasi/strip) -> format +62..."""
+    n = re.sub(r"[\s\-()]", "", n)
+    if n.startswith("0"):
+        n = "+62" + n[1:]
+    elif n.startswith("62"):
+        n = "+" + n
+    elif not n.startswith("+"):
+        n = "+" + n
+    return n
 
 
 def ambil_kunci():
-    """Baca api_id + api_hash dari kunci.json; kalau belum ada, tanya lalu simpan."""
     if os.path.exists(FILE_KUNCI):
-        with open(FILE_KUNCI, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return int(data["api_id"]), data["api_hash"]
-
-    print("Sekali ini saja Master perlu isi kunci API (dari my.telegram.org).")
-    api_id = input("API_ID (angka): ").strip()
-    api_hash = input("API_HASH (kode panjang): ").strip()
+        try:
+            with open(FILE_KUNCI, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return int(data["api_id"]), str(data["api_hash"])
+        except Exception:
+            print("File kunci lama rusak — kita isi ulang ya.\n")
+    print("Bagian 1 — Kunci API (cuma ditanya sekali ini saja)")
+    print("Ambilnya di my.telegram.org, menu API development tools.")
+    while True:
+        mentah = tanya("  API_ID (angka semua): ").replace(" ", "")
+        if mentah.isdigit():
+            api_id = int(mentah)
+            break
+        print("  API_ID itu isinya angka semua — coba lagi ya.")
+    api_hash = tanya("  API_HASH (kode panjang): ").replace(" ", "")
     with open(FILE_KUNCI, "w", encoding="utf-8") as f:
-        json.dump({"api_id": int(api_id), "api_hash": api_hash}, f)
-    print("Tersimpan di kunci.json — lain kali tidak ditanya lagi.")
-    print("INGAT: kunci.json jangan dibagikan ke siapa pun.\n")
-    return int(api_id), api_hash
+        json.dump({"api_id": api_id, "api_hash": api_hash}, f)
+    print("  Tersimpan. Lain kali tidak ditanya lagi.\n")
+    return api_id, api_hash
+
+
+async def masuk(client):
+    await client.connect()
+    if await client.is_user_authorized():
+        return
+    print("Bagian 2 — Masuk ke Telegram Master")
+    phone = bersihkan_nomor(tanya("  Nomor HP Master (contoh: 0812...): "))
+    await client.send_code_request(phone)
+    print("  Kode masuk ke APLIKASI Telegram Master (biasanya bukan SMS).")
+    code = tanya("  Ketik kodenya di sini: ").replace(" ", "")
+    try:
+        await client.sign_in(phone, code)
+    except errors.SessionPasswordNeededError:
+        pw = getpass("  Ada password dua langkah — ketik di sini (tidak kelihatan): ")
+        await client.sign_in(password=pw)
+    except errors.PhoneCodeInvalidError:
+        print("  Kodenya salah. Jalankan lagi skripnya ya, Master.")
+        sys.exit(1)
+    except errors.PhoneCodeExpiredError:
+        print("  Kodenya kedaluwarsa. Jalankan lagi skripnya ya, Master.")
+        sys.exit(1)
+    print("  Berhasil masuk.\n")
 
 
 async def main():
+    print("=" * 46)
+    print("  PENGHAPUS PESAN TELEGRAM SAYA")
+    print("  Yang dihapus cuma pesan Master — pesan dia utuh.")
+    print("=" * 46)
+    print()
     api_id, api_hash = ambil_kunci()
-    client = TelegramClient("sesi-saya", api_id, api_hash)
-
-    async with client:
+    client = TelegramClient(os.path.join(DASAR, "sesi-saya"), api_id, api_hash)
+    await masuk(client)
+    try:
         me = await client.get_me()
+        print(f"Masuk sebagai: {me.first_name}\n")
 
-        target_input = input(
-            "Chat siapa yang mau dibersihkan? (username tanpa @, atau nomor +62...): "
-        ).strip()
-        target = await client.get_input_entity(target_input)
+        print("Bagian 3 — Pilih chatnya")
+        target_input = tanya("  Username (tanpa @) atau nomor HP orangnya: ")
+        if target_input.startswith("@"):
+            target_input = target_input[1:]
+        if re.fullmatch(r"[0-9\s\-+()]+", target_input):
+            target_input = bersihkan_nomor(target_input)
+        try:
+            target = await client.get_input_entity(target_input)
+            entity = await client.get_entity(target)
+        except Exception:
+            print("  Orangnya tidak ketemu. Cek lagi username / nomornya ya.")
+            return
+        nama = (
+            getattr(entity, "first_name", None)
+            or getattr(entity, "title", None)
+            or str(target_input)
+        )
+        print(f"  Chat dengan: {nama}")
 
-        # Hitung dulu pesan Master di chat ini — tanpa menghapus apa pun.
-        print("Menghitung pesan Master di chat ini...")
+        print("  Menghitung pesan Master di chat ini...")
         jumlah = 0
         async for m in client.iter_messages(target):
             if m.sender_id == me.id:
                 jumlah += 1
-        print(f"Ditemukan {jumlah} pesan Master di chat ini.")
         if jumlah == 0:
-            print("Tidak ada yang perlu dihapus. Selesai.")
+            print("  Tidak ada pesan Master di chat ini. Aman — selesai.")
+            return
+        print(f"  Ada {jumlah} pesan Master di chat ini.")
+        print("  Kalau dihapus, pesan itu hilang di HP Master DAN di HP dia.")
+        jawab = tanya("  Hapus semua? Ketik HAPUS lalu Enter (selain itu = batal): ").lower()
+        if jawab not in ("hapus", "ya", "y"):
+            print("  Dibatalkan. Tidak ada pesan yang dihapus.")
             return
 
-        jawab = input(
-            f"Hapus SEMUA {jumlah} pesan itu, hilang juga di HP dia? "
-            "Ketik HAPUS (huruf besar) kalau yakin: "
-        ).strip()
-        if jawab != "HAPUS":
-            print("Dibatalkan. Tidak ada pesan yang dihapus.")
-            return
-
+        print("\n  Menghapus... jangan tutup Termux-nya ya.")
         ids = []
         total = 0
+        mulai = time.time()
 
         async def flush():
             nonlocal total
-            if ids:
-                await client.delete_messages(target, list(ids), revoke=True)
-                total += len(ids)
-                print(f"terhapus sejauh ini: {total} / {jumlah}")
-                ids.clear()
-                await asyncio.sleep(2)  # jeda biar tidak kena flood limit
+            while ids:
+                try:
+                    await client.delete_messages(target, list(ids), revoke=True)
+                    total += len(ids)
+                    ids.clear()
+                    print(f"    terhapus {total} dari {jumlah}...")
+                except errors.FloodWaitError as e:
+                    print(f"    Telegram minta jeda {e.seconds} detik — kita tunggu otomatis...")
+                    await asyncio.sleep(e.seconds + 1)
+                await asyncio.sleep(1)
 
         async for m in client.iter_messages(target):
             if m.sender_id == me.id:
@@ -99,7 +164,10 @@ async def main():
                 if len(ids) >= 100:
                     await flush()
         await flush()
-        print(f"SELESAI. Total pesan Master yang terhapus: {total}")
+        print(f"\n  SELESAI — {total} pesan Master terhapus dalam {int(time.time() - mulai)} detik.")
+        print("  Pesan dia tidak ada yang berubah. Sampai jumpa, Master.")
+    finally:
+        await client.disconnect()
 
 
 asyncio.run(main())
