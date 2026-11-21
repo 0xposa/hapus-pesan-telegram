@@ -25,8 +25,8 @@ from telethon import TelegramClient
 API_ID = 0                # contoh: 1234567
 API_HASH = ""             # contoh: "abcdef123456..."
 TARGET = ""               # username lawan bicara (tanpa @) atau nomor +62...
-BATAS_UJI = 20            # mode uji: hapus maksimal segini dulu.
-                          # Ganti jadi None kalau sudah yakin hapus SEMUA.
+BATAS_UJI = None          # None = hapus SEMUA pesan Master di chat itu.
+                          # Kalau mau uji dulu, ganti jadi angka (mis. 20).
 REVOKE = True             # True = hilang di dua sisi. False = cuma di HP Master.
 # ----------------------
 
